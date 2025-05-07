@@ -133,7 +133,7 @@ def download_video(link, quality, format_type, subtitles=False):
 # App Header with Logo and Title
 col1, col2 = st.columns([1, 4])
 with col1:
-    st.image("assets\logo.png.png", width=70)  # Replace with your actual logo URL
+    st.image("assets/logo.png.png", width=70)  # Replace with your actual logo URL
 with col2:
     st.title("Video Downloader Pro")
 

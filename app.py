@@ -66,7 +66,6 @@ if 'reviews' not in st.session_state:
 # CORE FUNCTIONS
 # ======================
 def detect_platform(url):
-    # Parse the URL and remove any query parameters
     parsed_url = urlparse(url)
     clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
     
@@ -80,17 +79,8 @@ def get_video_info(link):
     ydl_opts = {
         'quiet': True,
         'skip_download': True,
-        'force_generic_extractor': False,
         'no_warnings': True,
-        # Add headers to mimic a real browser
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Accept-Encoding': 'gzip,deflate',
-            'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-            'Connection': 'keep-alive',
-        },
+        'extract_flat': False,
     }
     try:
         with YoutubeDL(ydl_opts) as ydl:
@@ -101,107 +91,109 @@ def get_video_info(link):
         return None
 
 def download_video(link, quality, format_type, subtitles=False):
-    format_map = {
-        "MP4": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "WEBM": "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best",
-        "MP3": "bestaudio[ext=m4a]",
-        "M4A": "bestaudio[ext=m4a]",
-        "AVI": "bestvideo[ext=avi]+bestaudio/best[ext=avi]",
-        "MOV": "bestvideo[ext=mov]+bestaudio/best[ext=mov]"
-    }
-    
-    quality_map = {
-        "Best": format_map[format_type],
-        "4K": "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-        "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-        "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]",
-        "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]",
-        "360p": "bestvideo[height<=360]+bestaudio/best[height<=360]"
-    }
-    
+    # Enhanced yt-dlp configuration to avoid 403 errors
     ydl_opts = {
-        'format': quality_map[quality],
         'outtmpl': 'downloads/%(title)s.%(ext)s',
         'writesubtitles': subtitles,
         'subtitleslangs': ['en'],
-        'postprocessors': [],
         'noplaylist': True,
         'continuedl': True,
-        # Enhanced options to avoid 403 errors
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Accept-Encoding': 'gzip,deflate',
-            'Connection': 'keep-alive',
-        },
-        'extract_flat': False,
         'ignoreerrors': True,
         'no_warnings': False,
         'retries': 10,
         'fragment_retries': 10,
         'skip_unavailable_fragments': True,
-        'keep_fragments': True,
+        'extract_flat': False,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Encoding': 'gzip,deflate',
+            'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+            'Connection': 'keep-alive',
+        },
     }
     
+    # Format selection
     if format_type in ["MP3", "M4A"]:
-        ydl_opts['postprocessors'].append({
+        ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': format_type.lower(),
             'preferredquality': '192',
-        })
+        }]
+    else:
+        # Video format selection based on quality
+        quality_map = {
+            "Best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "4K": "bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/best[height<=2160]",
+            "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
+            "720p": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]",
+            "480p": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]",
+            "360p": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360]"
+        }
+        ydl_opts['format'] = quality_map.get(quality, "best")
     
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
             filename = ydl.prepare_filename(info)
+            
+            # For audio formats, update filename extension
+            if format_type in ["MP3", "M4A"]:
+                base_name = os.path.splitext(filename)[0]
+                filename = f"{base_name}.{format_type.lower()}"
+            
             return filename, info.get('title', 'video'), info
     except Exception as e:
         st.error(f"Download error: {str(e)}")
-        # Try alternative method
-        return download_video_alternative(link, quality, format_type)
+        # Try with simpler options as fallback
+        return download_video_fallback(link, format_type)
 
-def download_video_alternative(link, quality, format_type):
-    """Alternative download method with different options"""
+def download_video_fallback(link, format_type):
+    """Fallback download method with minimal options"""
     ydl_opts = {
-        'format': 'best',
+        'format': 'best' if format_type not in ["MP3", "M4A"] else 'bestaudio/best',
         'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'noplaylist': True,
         'ignoreerrors': True,
         'no_warnings': False,
-        'retries': 10,
-        'fragment_retries': 10,
-        'skip_unavailable_fragments': True,
-        'extract_flat': False,
     }
+    
+    if format_type in ["MP3", "M4A"]:
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': format_type.lower(),
+            'preferredquality': '192',
+        }]
     
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(link, download=True)
             filename = ydl.prepare_filename(info)
+            
+            if format_type in ["MP3", "M4A"]:
+                base_name = os.path.splitext(filename)[0]
+                filename = f"{base_name}.{format_type.lower()}"
+            
             return filename, info.get('title', 'video'), info
     except Exception as e:
-        raise Exception(f"Alternative download also failed: {str(e)}")
+        raise Exception(f"Download failed: {str(e)}")
 
 # ======================
 # UI COMPONENTS
 # ======================
 # App Header with Logo and Title
-col1, col2 = st.columns([1, 4])
-with col1:
-    # Use a placeholder or emoji if logo doesn't exist
-    try:
-        st.image("🎬", width=70)
-    except:
-        st.image("🎬", width=70)
-with col2:
-    st.title("Video Downloader Pro")
+st.markdown("""
+<div style="display: flex; align-items: center; margin-bottom: 20px;">
+    <h1 style="margin: 0;">🎬 Video Downloader Pro</h1>
+</div>
+""", unsafe_allow_html=True)
 
 # Security Badge
 st.markdown("""
 <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:20px;">
     <div style="display:flex; align-items:center;">
-        <span style="margin-left:10px; color:#4CAF50; font-weight:bold;">Secure & Private</span>
+        <span style="color:#4CAF50; font-weight:bold;">🛡️ Secure & Private</span>
         <span style="margin-left:15px; font-size:14px;">No data collection • No ads • End-to-end encryption</span>
     </div>
 </div>
@@ -334,9 +326,12 @@ with tab1:
                     if thumbnail_url:
                         try:
                             response = requests.get(thumbnail_url, timeout=10)
-                            img = Image.open(BytesIO(response.content))
-                            st.image(img, width='stretch')
-                        except:
+                            if response.status_code == 200:
+                                img = Image.open(BytesIO(response.content))
+                                st.image(img, width='stretch')
+                            else:
+                                st.warning("Couldn't load thumbnail")
+                        except Exception as e:
                             st.warning("Couldn't load thumbnail")
                     
                     # Video Metadata
@@ -368,42 +363,43 @@ with tab1:
                                     progress_bar.progress(percent_complete + 1)
                                 
                                 # Add to history or private folder
-                                if private_download and 'password' in locals():
+                                download_item = {
+                                    'title': video_title,
+                                    'platform': platform,
+                                    'url': url,
+                                    'time': time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    'file': filename
+                                }
+                                
+                                if private_download and 'password' in locals() and password:
                                     file_hash = hashlib.sha256(password.encode()).hexdigest()
-                                    st.session_state.private_videos[file_hash] = st.session_state.private_videos.get(file_hash, []) + [{
-                                        'title': video_title,
-                                        'platform': platform,
-                                        'url': url,
-                                        'time': time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        'file': filename
-                                    }]
+                                    if file_hash not in st.session_state.private_videos:
+                                        st.session_state.private_videos[file_hash] = []
+                                    st.session_state.private_videos[file_hash].append(download_item)
                                     st.success("🔒 Saved to private folder!")
                                 else:
-                                    st.session_state.download_history.append({
-                                        'title': video_title,
-                                        'platform': platform,
-                                        'url': url,
-                                        'time': time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        'file': filename
-                                    })
+                                    st.session_state.download_history.append(download_item)
+                                    st.success("✅ Download completed!")
                                 
                                 # Download button
                                 try:
-                                    with open(filename, "rb") as file:
-                                        st.download_button(
-                                            label=f"💾 Save {video_title[:20]}",
-                                            data=file,
-                                            file_name=os.path.basename(filename),
-                                            mime="video/mp4" if download_format != "MP3" else "audio/mp3",
-                                            key=f"save_{hash(url)}",
-                                            help="Click to save to your device"
-                                        )
-                                except FileNotFoundError:
-                                    st.error("Downloaded file not found. The download may have failed.")
+                                    if os.path.exists(filename):
+                                        with open(filename, "rb") as file:
+                                            st.download_button(
+                                                label=f"💾 Save {video_title[:20]}",
+                                                data=file,
+                                                file_name=os.path.basename(filename),
+                                                mime="video/mp4" if download_format not in ["MP3", "M4A"] else "audio/mpeg",
+                                                key=f"save_{hash(url)}",
+                                                help="Click to save to your device"
+                                            )
+                                    else:
+                                        st.error("Downloaded file not found. The download may have failed.")
+                                except Exception as e:
+                                    st.error(f"Error creating download button: {str(e)}")
                                 
                                 st.balloons()
                                 st.success(f"✅ Download completed in {time.time()-start_time:.2f} seconds")
-                                st.markdown(f"**Now playing:** {video_title}")
                                 st.session_state.current_video = filename
                             
                             except Exception as e:
@@ -414,18 +410,19 @@ with tab1:
                                 - Check if the video is available in your region
                                 - Try again in a few minutes
                                 - Use MP3 format for audio-only downloads
+                                - The video might be age-restricted or private
                                 """)
             
             except Exception as e:
                 st.error(f"⚠️ Error processing {url}: {str(e)}")
                 st.info("Try again or check if the URL is correct")
 
-# Rest of your tabs remain the same...
+# Rest of the tabs (Private, Playlists, Player, Reviews) remain similar to previous version...
 with tab2:
     st.header("🔒 Private Folder")
     st.info("Your private videos are password-protected and only visible when you enter the correct password")
     
-    password_input = st.text_input("Enter Your Password", type="password", 
+    password_input = st.text_input("Enter Your Password", type="password", key="private_password",
                                  help="Enter the password you set when saving videos")
     
     if password_input:
@@ -439,13 +436,11 @@ with tab2:
                     cols = st.columns([4, 1, 1])
                     cols[0].markdown(f"**{idx+1}. {item['title']}**  \n*{item['platform']} - {item['time']}*")
                     
-                    if cols[1].button("▶️ Play", key=f"play_private_{idx}", 
-                                    help="Play this video in built-in player"):
+                    if cols[1].button("▶️ Play", key=f"play_private_{idx}"):
                         st.session_state.current_video = item['file']
                         st.rerun()
                     
-                    if cols[2].button("🗑️ Delete", key=f"delete_private_{idx}", 
-                                    type="secondary", help="Permanently delete this video"):
+                    if cols[2].button("🗑️ Delete", key=f"delete_private_{idx}", type="secondary"):
                         try:
                             if os.path.exists(item['file']):
                                 os.remove(item['file'])
@@ -454,7 +449,7 @@ with tab2:
                         except Exception as e:
                             st.error(f"Error deleting: {str(e)}")
         else:
-            st.warning("No videos found with this password. Try a different password or save some videos to private folder first.")
+            st.warning("No videos found with this password.")
 
 with tab3:
     st.header("🎵 Your Playlists")
@@ -486,11 +481,11 @@ with tab3:
                     "Select Video",
                     [f"{h['title']} ({h['time']})" for h in st.session_state.download_history],
                     index=0,
-                    help="Choose from your download history"
+                    key="playlist_select"
                 )
                 if st.button(f"➕ Add to {selected_playlist}"):
-                    selected_item = st.session_state.download_history[
-                        [f"{h['title']} ({h['time']})" for h in st.session_state.download_history].index(video_to_add)]
+                    selected_index = [f"{h['title']} ({h['time']})" for h in st.session_state.download_history].index(video_to_add)
+                    selected_item = st.session_state.download_history[selected_index]
                     st.session_state.playlists[selected_playlist].append(selected_item)
                     st.success(f"Added to {selected_playlist}!")
             
@@ -520,26 +515,17 @@ with tab4:
     if st.session_state.current_video and os.path.exists(st.session_state.current_video):
         st.success(f"Now Playing: {os.path.basename(st.session_state.current_video)}")
         try:
-            video_file = open(st.session_state.current_video, 'rb')
-            video_bytes = video_file.read()
-            st.video(video_bytes)
+            with open(st.session_state.current_video, 'rb') as video_file:
+                video_bytes = video_file.read()
+                st.video(video_bytes)
         except Exception as e:
             st.error(f"Error playing video: {str(e)}")
-        
-        # Player controls
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("⏮️ Previous Video"):
-                st.info("Previous video feature would play the previous item in current context")
-        with col2:
-            if st.button("⏭️ Next Video"):
-                st.info("Next video feature would play the next item in current context")
     else:
         st.info("No video selected. Play a video from your downloads, private folder or playlists")
         if st.session_state.download_history:
             st.subheader("Quick Play Recent Downloads")
-            for item in st.session_state.download_history[:3]:
-                if st.button(f"▶️ {item['title'][:30]}", key=f"quick_play_{hash(item['title'])}"):
+            for idx, item in enumerate(st.session_state.download_history[:3]):
+                if st.button(f"▶️ {item['title'][:30]}", key=f"quick_play_{idx}"):
                     st.session_state.current_video = item['file']
                     st.rerun()
 
@@ -571,7 +557,7 @@ with tab5:
     # Display Reviews
     st.subheader("User Reviews")
     if st.session_state.reviews:
-        for review in reversed(st.session_state.reviews):
+        for idx, review in enumerate(reversed(st.session_state.reviews)):
             with st.container(border=True):
                 cols = st.columns([1, 4])
                 with cols[0]:
@@ -595,11 +581,11 @@ with st.expander("📚 Download History", expanded=False):
                 cols = st.columns([4, 1, 1])
                 cols[0].markdown(f"**{idx+1}. {item['title']}**  \n*{item['platform']} - {item['time']}*")
                 
-                if cols[1].button("▶️ Play", key=f"play_{idx}"):
+                if cols[1].button("▶️ Play", key=f"play_hist_{idx}"):
                     st.session_state.current_video = item['file']
                     st.rerun()
                 
-                if cols[2].button("🗑️ Delete", key=f"delete_{idx}", type="secondary"):
+                if cols[2].button("🗑️ Delete", key=f"delete_hist_{idx}", type="secondary"):
                     try:
                         if os.path.exists(item['file']):
                             os.remove(item['file'])

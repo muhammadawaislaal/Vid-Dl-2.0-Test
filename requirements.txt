@@ -1,4 +1,4 @@
 streamlit
-yt-dlp
+yt-dlp>=2025.9.26
 Pillow
 requests
